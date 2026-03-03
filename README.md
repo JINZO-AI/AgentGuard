@@ -1,42 +1,98 @@
-# 🛡️ AgentGuard 
+# 🛡️ AgentGuard
 
-I built AgentGuard because everyone is talking about AI agents, but no one is talking about how to actually make them "legal" for real companies to use. If you're building an agent in 2026, you're going to hit a wall with things like the **EU AI Act**, **HIPAA**, or **SOX** compliance.
+AI agent compliance and audit trail system. Acts as a transparent reverse proxy in front of AI providers — intercepting every call to scan for PII, score regulatory risk, and write an immutable audit log.
 
-AgentGuard is a middleware "safety net" that sits between your agent and the LLM (OpenAI/Anthropic). It watches the traffic, catches sensitive data (PII) before it leaks, and automatically builds the audit logs that lawyers and auditors actually care about.
+---
 
-## ✨ What it actually does
-* **The "One-Line" Proxy:** You don't have to rewrite your whole app. Just change the `base_url` in your OpenAI/Anthropic client to point to AgentGuard.
-* **PII Sniffer:** Automatically flags emails, credit cards, and SSNs in prompts or responses.
-* **Legal Report Bot:** It generates those annoying **Annex IV** technical docs required by the EU AI Act so you don't have to write them by hand.
-* **Risk Scoring:** It gives every interaction a "risk score" based on current regulations.
+## 🏗️ Architecture
 
-## 🚀 Tech Stack
-I kept this lean and free-tier friendly:
-* **FastAPI** (The backbone)
-* **SQLite** (Local storage, super easy to move to Supabase later)
-* **httpx** (For the proxy logic)
-* **Jinja2** (For generating the compliance reports)
+```
+Your App
+    │
+    ▼
+POST /proxy/openai/v1/...  (or /anthropic, /groq)
+    │
+    ├── 🔍 AgentInterceptorMiddleware (Starlette)
+    │     ├── PIIDetector       — regex scan, 10 PII types
+    │     ├── RiskClassifier    — EU AI Act keyword classification
+    │     ├── ComplianceFlagger — maps violations to regulatory articles
+    │     └── SHA-256 hash → async write to SQLite audit_logs
+    │
+    ▼
+Provider API (OpenAI / Anthropic / Groq)
+    │
+    ▼
+Response returned to your app unchanged
+```
 
-## 🛠️ Quick Setup
-1. **Clone it:** `git clone https://github.com/yourname/agentguard.git`
-2. **Install:** `pip install -r requirements.txt`
-3. **Set your keys:** Create a `.env` file and add your `OPENAI_API_KEY`.
-4. **Run it:** `uvicorn main:app --reload`
+Four SQLite tables: `agents`, `audit_logs`, `compliance_checks`, `reports`.  
+Raw prompts and responses are **never stored** — only SHA-256 hashes.
 
-## 🔌 How to use it
-In your agent code, just swap your base URL. It takes about 10 seconds:
+---
+
+## ✅ What it does
+
+- 🔀 Proxies calls to OpenAI, Anthropic, and Groq with no changes to the response
+- 🔎 Scans every prompt and response for 10 PII types (email, SSN, credit card, IBAN, medical ID, etc.) using regex
+- ⚖️ Classifies interactions against EU AI Act risk levels (minimal / limited / high / unacceptable)
+- 📋 Writes a SHA-256 hashed, immutable audit log to SQLite — raw content is never stored
+- 📊 Scores compliance against EU AI Act, HIPAA, and SOX mapped to specific regulatory articles
+- 📄 Auto-generates EU AI Act Annex IV technical documentation in Markdown
+- 🖥️ React dashboard included — currently uses hardcoded mock data
+
+**Tested and confirmed working:** PII detection (SSN, email, phone), OpenAI and Groq proxying, audit log writing, compliance flag generation with GDPR/EU AI Act article mapping, risk scoring.
+
+---
+
+## 🚀 Quick Start
+
+```bash
+git clone https://github.com/JINZO-AI/AgentGuard
+cd AgentGuard/backend
+pip install -r requirements.txt
+cp .env.example .env   # add your own API keys — never commit .env
+python main.py
+# API docs: http://localhost:8000/api/docs
+```
+
+## 🔌 Integration
 
 ```python
-from openai import OpenAI
+# Before
+client = OpenAI(api_key="sk-...")
 
+# After — one line change
 client = OpenAI(
-    api_key="your-key",
-    base_url="http://localhost:8000/proxy/openai/v1" # This is the magic line
+    api_key="sk-...",
+    base_url="http://localhost:8000/proxy/openai/v1"
 )
 
-# Now every call is automatically logged and checked for compliance
-response = client.chat.completions.create(
-    model="gpt-4o-mini",
-    messages=[{"role": "user", "content": "Analyze these customer records."}],
-    extra_headers={"X-Agent-ID": "finance-bot-01"} 
-)
+# Tag calls with a registered agent ID
+extra_headers={"X-Agent-ID": "your-agent-id"}
+```
+
+Groq works the same way via `/proxy/groq/v1`.
+
+---
+
+## 🛠️ Stack
+
+Python · FastAPI · Starlette middleware · aiosqlite · Pydantic v2 · httpx · React 18
+
+---
+
+## ⚠️ Known Limitations
+
+- No authentication on API endpoints
+- CORS is set to `allow_origins=["*"]`
+- DB path is hardcoded in routes — `DATABASE_URL` in `.env` is not used
+- PII detection is regex only — false positives and negatives are expected
+- `AgentRegistration` validates provider as `openai|anthropic|custom` but the proxy also supports Groq
+- No test suite
+- Dashboard displays mock data, not live API data
+
+---
+
+## 📜 Disclaimer
+
+AgentGuard generates compliance evidence and documentation for informational purposes only. It is not a substitute for qualified legal counsel. Annex IV documents should be reviewed by a compliance officer before any regulatory submission. Business Associate Agreements with AI providers must be executed separately.
